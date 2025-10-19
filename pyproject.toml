@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=62", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "idlerpg-zero"
+version = "0.1.0"
+description = "A simplified IdleRPG Discord bot with slash commands"
+readme = "README.md"
+authors = [{name = "IdleRPG Maintainers"}]
+license = {text = "MIT"}
+dependencies = [
+    "discord-py>=2.3.2",
+    "aiosqlite>=0.19.0",
+    "python-dotenv>=1.0.0",
+]
+requires-python = ">=3.10"
+
+[project.scripts]
+idlerpg-zero = "idlerpg_zero.__main__:main"
+
+[tool.setuptools]
+packages = ["idlerpg_zero"]
