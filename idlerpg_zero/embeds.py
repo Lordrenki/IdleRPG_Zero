@@ -34,10 +34,23 @@ from .quests import (
     find_quest,
     summarize_rewards,
 )
+from .version import BOT_NAME, BOT_VERSION
 
 PRIMARY_COLOR = discord.Color.from_rgb(255, 170, 45)
 ERROR_COLOR = discord.Color.red()
 SUCCESS_COLOR = discord.Color.green()
+
+FOOTER_CREDITS = "© 2025 Zero Interactive. Made with ❤️ by Kuro."
+
+
+def _set_standard_footer(embed: discord.Embed, *, extra: Optional[str] = None) -> None:
+    """Apply the shared footer that includes the bot version and credits."""
+
+    lines = [f"{BOT_NAME} {BOT_VERSION}"]
+    if extra:
+        lines.append(extra)
+    lines.append(FOOTER_CREDITS)
+    embed.set_footer(text="\n".join(lines))
 
 
 def profile_embed(
@@ -201,7 +214,7 @@ def profile_embed(
                 "No achievements unlocked yet. Complete quests to earn more accolades!"
             ]
         embed.add_field(name="Achievements", value="\n".join(lines), inline=False)
-    embed.set_footer(text="IdleRPG Zero • Slash commands for easy adventuring")
+    _set_standard_footer(embed, extra="Slash commands for easy adventuring")
     return embed
 
 
@@ -218,6 +231,7 @@ def achievements_embed(
         embed.description = (
             "No achievements unlocked yet. Complete quests, raids, and milestones to earn badges!"
         )
+        _set_standard_footer(embed)
         return embed
 
     for record in achievements:
@@ -228,6 +242,7 @@ def achievements_embed(
             value=f"{achievement.description}\nUnlocked {earned}.",
             inline=False,
         )
+    _set_standard_footer(embed)
     return embed
 
 
@@ -261,7 +276,7 @@ def quest_result_embed(
             value=_format_material_rewards(materials),
             inline=False,
         )
-    embed.set_footer(text="Complete quests to grow stronger!")
+    _set_standard_footer(embed, extra="Complete quests to grow stronger!")
     return embed
 
 
@@ -303,7 +318,7 @@ def quest_list_embed(
         value = "\n\n".join(entries)
         embed.add_field(name=display, value=value, inline=False)
 
-    embed.set_footer(text="Use /quest start <name> or /adventure to embark.")
+    _set_standard_footer(embed, extra="Use /quest start <name> or /adventure to embark.")
     return embed
 
 
@@ -347,7 +362,7 @@ def quest_story_embed(
             value=_format_material_rewards(materials),
             inline=False,
         )
-    embed.set_footer(text="Check /quest list to track cooldowns and stories.")
+    _set_standard_footer(embed, extra="Check /quest list to track cooldowns and stories.")
     return embed
 
 
@@ -373,7 +388,7 @@ def raid_result_embed(
             value=_format_material_rewards(materials),
             inline=False,
         )
-    embed.set_footer(text="Raids demand teamwork and plenty of preparation!")
+    _set_standard_footer(embed, extra="Raids demand teamwork and plenty of preparation!")
     return embed
 
 
@@ -421,7 +436,10 @@ def raid_spawn_embed(
             value=boss.material_reward_rarity.title(),
             inline=True,
         )
-    embed.set_footer(text="Use /raid join and /raid attack to challenge the boss together!")
+    _set_standard_footer(
+        embed,
+        extra="Use /raid join and /raid attack to challenge the boss together!",
+    )
     return embed
 
 
@@ -448,7 +466,7 @@ def raid_join_embed(
     )
     status = "Active" if raid.is_active else "Completed"
     embed.add_field(name="Raid Status", value=status, inline=True)
-    embed.set_footer(text="Use /raid attack to strike the boss!")
+    _set_standard_footer(embed, extra="Use /raid attack to strike the boss!")
     return embed
 
 
@@ -505,7 +523,7 @@ def event_info_embed(
         else:
             raid_value = f"**{raid_boss.name}** — Awaiting challengers"
         embed.add_field(name="Event Raid", value=raid_value, inline=False)
-    embed.set_footer(text="Event rewards expire when the event ends.")
+    _set_standard_footer(embed, extra="Event rewards expire when the event ends.")
     return embed
 
 
@@ -548,7 +566,10 @@ def event_join_embed(
         elif raid is not None and not raid.is_active:
             raid_value += " — Defeated"
         embed.add_field(name="Event Raid", value=raid_value, inline=False)
-    embed.set_footer(text="Use /event attack to challenge the event raid boss.")
+    _set_standard_footer(
+        embed,
+        extra="Use /event attack to challenge the event raid boss.",
+    )
     return embed
 
 
@@ -619,7 +640,7 @@ def raid_attack_embed(
             )
 
     footer = "The raid continues!" if raid.is_active else "Celebrate your victory!"
-    embed.set_footer(text=footer)
+    _set_standard_footer(embed, extra=footer)
     return embed
 
 
@@ -652,7 +673,10 @@ def raid_leaderboard_embed(
         embed.add_field(name="Top Raiders", value="\n".join(lines), inline=False)
     else:
         embed.add_field(name="Top Raiders", value="No damage dealt yet.", inline=False)
-    embed.set_footer(text="Join with /raid join and attack with /raid attack!")
+    _set_standard_footer(
+        embed,
+        extra="Join with /raid join and attack with /raid attack!",
+    )
     return embed
 
 
@@ -664,7 +688,7 @@ def work_result_embed(member: discord.abc.User, outcome, player: Player) -> disc
     )
     embed.add_field(name="Gold", value=f"💰 {player.gold}", inline=True)
     embed.add_field(name="Energy", value=f"⚡ {player.energy}/100", inline=True)
-    embed.set_footer(text="Keep working between quests for steady rewards")
+    _set_standard_footer(embed, extra="Keep working between quests for steady rewards")
     return embed
 
 
@@ -682,6 +706,7 @@ def heal_embed(member: discord.abc.User, healed: int, cost: int, player: Player)
     )
     embed.add_field(name="Current HP", value=f"❤️ {player.hp}/{player.max_hp}", inline=True)
     embed.add_field(name="Gold", value=f"💰 {player.gold}", inline=True)
+    _set_standard_footer(embed)
     return embed
 
 
@@ -699,6 +724,7 @@ def rest_embed(member: discord.abc.User, energy_gain: int, player: Player) -> di
     )
     embed.add_field(name="Energy", value=f"⚡ {player.energy}/100", inline=True)
     embed.add_field(name="Health", value=f"❤️ {player.hp}/{player.max_hp}", inline=True)
+    _set_standard_footer(embed)
     return embed
 
 
@@ -725,7 +751,7 @@ def leaderboard_embed(
             line += f" • {player_class.name}"
         description_lines.append(line)
     embed.description = "\n".join(description_lines) or "No adventurers yet."
-    embed.set_footer(text="Climb the leaderboard by completing quests!")
+    _set_standard_footer(embed, extra="Climb the leaderboard by completing quests!")
     return embed
 
 
@@ -798,12 +824,13 @@ def duel_result_embed(
     if season_start is not None:
         season_text = discord.utils.format_dt(season_start, style="D")
         if seasonal_reset_enabled:
-            footer = f"Seasonal PvP reset began {season_text}"
+            extra = f"Seasonal PvP reset began {season_text}"
         else:
-            footer = f"PvP tracking since {season_text}"
-        embed.set_footer(text=footer)
+            extra = f"PvP tracking since {season_text}"
     else:
-        embed.set_footer(text="PvP battles are recorded globally.")
+        extra = "PvP battles are recorded globally."
+
+    _set_standard_footer(embed, extra=extra)
 
     return embed
 
@@ -853,17 +880,18 @@ def global_leaderboard_embed(
     if category_key == "pvp_wins" and season_start is not None:
         season_text = discord.utils.format_dt(season_start, style="D")
         if seasonal_reset_enabled:
-            footer = f"Current PvP season began {season_text}."
+            extra = f"Current PvP season began {season_text}."
         else:
-            footer = f"PvP season tracking since {season_text}."
-        embed.set_footer(text=footer)
+            extra = f"PvP season tracking since {season_text}."
     elif category_key == "pvp_wins":
         if seasonal_reset_enabled:
-            embed.set_footer(text="PvP seasons reset monthly.")
+            extra = "PvP seasons reset monthly."
         else:
-            embed.set_footer(text="PvP win tracking is persistent.")
+            extra = "PvP win tracking is persistent."
     else:
-        embed.set_footer(text="Compete to climb the global ranks!")
+        extra = "Compete to climb the global ranks!"
+
+    _set_standard_footer(embed, extra=extra)
 
     return embed
 
@@ -899,7 +927,10 @@ def guild_info_embed(
         value="\n".join(roster_lines[:20]) or "No members yet.",
         inline=False,
     )
-    embed.set_footer(text="Guilds grow stronger together through quests and wars!")
+    _set_standard_footer(
+        embed,
+        extra="Guilds grow stronger together through quests and wars!",
+    )
     return embed
 
 
@@ -915,7 +946,7 @@ def guild_leaderboard_embed(guilds: Sequence[Guild]) -> discord.Embed:
             f" • XP {guild.xp} • 🏛️ {guild.gold}"
         )
     embed.description = "\n".join(lines) or "No guilds have been founded yet."
-    embed.set_footer(text="Found a guild and climb the rankings together!")
+    _set_standard_footer(embed, extra="Found a guild and climb the rankings together!")
     return embed
 
 
@@ -930,7 +961,10 @@ def class_info_embed(info: ClassInfo) -> discord.Embed:
         value=info.ability_description,
         inline=False,
     )
-    embed.set_footer(text="Choose wisely—your class defines your combat style!")
+    _set_standard_footer(
+        embed,
+        extra="Choose wisely—your class defines your combat style!",
+    )
     return embed
 
 
@@ -942,11 +976,18 @@ def cooldown_embed(action: str, remaining: timedelta) -> discord.Embed:
         ),
         color=ERROR_COLOR,
     )
+    _set_standard_footer(embed)
     return embed
 
 
 def error_embed(message: str) -> discord.Embed:
-    return discord.Embed(title="Something went wrong", description=message, color=ERROR_COLOR)
+    embed = discord.Embed(
+        title="Something went wrong",
+        description=message,
+        color=ERROR_COLOR,
+    )
+    _set_standard_footer(embed)
+    return embed
 
 
 def _format_timedelta(delta: timedelta) -> str:
