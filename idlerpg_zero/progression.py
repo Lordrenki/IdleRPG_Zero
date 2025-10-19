@@ -5,11 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import random
-from typing import Tuple
+from typing import Optional, Tuple
 
 from .database import Player
 
-QUEST_COOLDOWN = timedelta(minutes=5)
+QUEST_COOLDOWN = timedelta(0)
 WORK_COOLDOWN = timedelta(minutes=3)
 REST_COOLDOWN = timedelta(minutes=10)
 MIN_HEAL_COST = 15
@@ -193,12 +193,28 @@ def regenerate_energy(player: Player) -> int:
 
 
 def can_quest(player: Player, now: datetime) -> Tuple[bool, timedelta]:
+    if player.active_quest_id is not None:
+        if player.active_quest_complete_at is None:
+            return False, QUEST_COOLDOWN
+        remaining = player.active_quest_complete_at - now
+        if remaining > timedelta(0):
+            return False, remaining
+
     if player.last_quest_at is None:
         return True, timedelta(0)
     elapsed = now - player.last_quest_at
     if elapsed >= QUEST_COOLDOWN:
         return True, timedelta(0)
     return False, QUEST_COOLDOWN - elapsed
+
+
+def active_quest_remaining(player: Player, now: datetime) -> Optional[timedelta]:
+    if player.active_quest_id is None or player.active_quest_complete_at is None:
+        return None
+    remaining = player.active_quest_complete_at - now
+    if remaining <= timedelta(0):
+        return timedelta(0)
+    return remaining
 
 
 def can_raid(player: Player, now: datetime) -> Tuple[bool, timedelta]:

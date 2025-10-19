@@ -75,6 +75,7 @@ from .progression import (
     effective_attack,
     effective_defense,
     energy_ready,
+    active_quest_remaining,
     heal_player,
     perform_quest,
     perform_work,
@@ -659,21 +660,41 @@ def create_bot(settings: Settings) -> IdleRPGBot:
             parts.append(f"{seconds}s")
         return " ".join(parts)
 
-    @dataclass(slots=True)
-    class RaidRewardSummary:
-        xp: int
-        gold: int
-        leveled_up: bool
-        loot: List[Item]
-        rare_item: Optional[Item]
-        materials: List[Tuple[Material, int]]
-        achievements: Sequence[Achievement]
+    def quest_block_embed(
+        player: Player,
+        quest: Optional[QuestDefinition],
+        remaining: Optional[timedelta],
+        *,
+        subject: str = "You",
+    ) -> discord.Embed:
+        quest_name = quest.name if quest else "your quest"
+        verb = "are" if subject.lower() == "you" else "is"
+        description: List[str] = [f"{subject} {verb} already adventuring on **{quest_name}**."]
+        if remaining is not None:
+            if remaining > timedelta(0):
+                description.append(f"Time remaining: **{short_timedelta(remaining)}**.")
+            else:
+                description.append(
+                    f"**{quest_name}** is ready to complete. Use /quest status to claim rewards."
+                )
+        if player.active_quest_complete_at:
+            description.append(
+                f"Return {discord.utils.format_dt(player.active_quest_complete_at, style='R')}"
+            )
+        description.append("Use /quest status to check your progress.")
+        return discord.Embed(
+            title="Quest in progress",
+            description="\n".join(description),
+            color=discord.Color.orange(),
+        )
 
-    async def execute_quest(
+    async def complete_active_quest(
         interaction: discord.Interaction,
+        player: Player,
         quest: QuestDefinition,
         *,
         progress_map: Optional[Dict[str, QuestProgress]] = None,
+        now: Optional[datetime] = None,
     ) -> None:
         guild = interaction.guild
         if guild is None:
@@ -682,64 +703,13 @@ def create_bot(settings: Settings) -> IdleRPGBot:
             )
             return
 
-        player = await bot.database.fetch_player(guild.id, interaction.user.id)
-        if player is None or player.class_id is None:
-            await interaction.response.send_message(
-                embed=error_embed(
-                    "Create your character with /create before embarking on quests."
-                ),
-                ephemeral=True,
-            )
-            return
-
-        now = datetime.now(timezone.utc)
-        ready, remaining = can_quest(player, now)
-        if not ready:
-            await interaction.response.send_message(
-                embed=cooldown_embed("quest", remaining), ephemeral=True
-            )
-            return
-        if player.hp <= 10:
-            await interaction.response.send_message(
-                embed=error_embed("You are too wounded. Visit /heal before the next quest."),
-                ephemeral=True,
-            )
-            return
-        if not energy_ready(player, quest.energy_cost):
-            await interaction.response.send_message(
-                embed=error_embed(
-                    f"You need at least {quest.energy_cost} energy. Try /rest or /work."
-                ),
-                ephemeral=True,
-            )
-            return
-
+        completion_time = now or datetime.now(timezone.utc)
         if progress_map is None:
             progress_lookup = await bot.database.fetch_player_quest_progress(
                 interaction.user.id
             )
         else:
             progress_lookup = progress_map
-        progress_entry = progress_lookup.get(quest.id)
-        availability = quest.availability(progress_entry, now)
-        if availability.locked:
-            await interaction.response.send_message(
-                embed=error_embed("You have already completed this story quest."),
-                ephemeral=True,
-            )
-            return
-        if not availability.available:
-            if availability.cooldown_remaining is not None:
-                await interaction.response.send_message(
-                    embed=cooldown_embed(quest.name, availability.cooldown_remaining),
-                    ephemeral=True,
-                )
-            else:
-                await interaction.response.send_message(
-                    embed=error_embed("This quest is not available yet."),
-                    ephemeral=True,
-                )
-            return
 
         marriage = await bot.database.fetch_marriage(guild.id, interaction.user.id)
         weapon_data = await bot.database.fetch_equipped_weapon(guild.id, interaction.user.id)
@@ -764,9 +734,7 @@ def create_bot(settings: Settings) -> IdleRPGBot:
         quest_materials: List[Tuple[Material, int]] = []
 
         if quest.rewards.xp or quest.rewards.gold:
-            leveled_reward = apply_xp_and_gold(
-                player, quest.rewards.xp, quest.rewards.gold
-            )
+            leveled_reward = apply_xp_and_gold(player, quest.rewards.xp, quest.rewards.gold)
             total_xp += quest.rewards.xp
             total_gold += quest.rewards.gold
             leveled_up = leveled_up or leveled_reward
@@ -818,9 +786,11 @@ def create_bot(settings: Settings) -> IdleRPGBot:
         items_found = quest_items + encounter_items
 
         player.quests_completed += 1
+        player.active_quest_id = None
+        player.active_quest_complete_at = None
         await bot.database.update_player(player)
         new_progress = await bot.database.record_quest_completion(
-            interaction.user.id, quest.id, now
+            interaction.user.id, quest.id, completion_time
         )
         progress_lookup[quest.id] = new_progress
 
@@ -860,15 +830,14 @@ def create_bot(settings: Settings) -> IdleRPGBot:
             if durability_change.broken:
                 await interaction.followup.send(
                     content=(
-                        f"⚠️ Your {durability_change.weapon.name} has broken and has been removed."
+                        f"⚠️ Your {durability_change.weapon.name} shattered during the battle and has been removed."
                     ),
                     ephemeral=True,
                 )
             else:
                 await interaction.followup.send(
                     content=(
-                        f"Your {durability_change.weapon.name} now has"
-                        f" {durability_change.durability} durability remaining."
+                        f"Your {durability_change.weapon.name} now has {durability_change.durability} durability remaining."
                     ),
                     ephemeral=True,
                 )
@@ -883,7 +852,153 @@ def create_bot(settings: Settings) -> IdleRPGBot:
             await interaction.followup.send(
                 "\n".join(achievement_lines),
                 ephemeral=True,
+                allowed_mentions=discord.AllowedMentions(users=[interaction.user]),
             )
+
+    @dataclass(slots=True)
+    class RaidRewardSummary:
+        xp: int
+        gold: int
+        leveled_up: bool
+        loot: List[Item]
+        rare_item: Optional[Item]
+        materials: List[Tuple[Material, int]]
+        achievements: Sequence[Achievement]
+
+    async def execute_quest(
+        interaction: discord.Interaction,
+        quest: QuestDefinition,
+        *,
+        progress_map: Optional[Dict[str, QuestProgress]] = None,
+    ) -> None:
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message(
+                embed=error_embed("Quests require a guild context."), ephemeral=True
+            )
+            return
+
+        player = await bot.database.fetch_player(guild.id, interaction.user.id)
+        if player is None or player.class_id is None:
+            await interaction.response.send_message(
+                embed=error_embed(
+                    "Create your character with /create before embarking on quests."
+                ),
+                ephemeral=True,
+            )
+            return
+
+        now = datetime.now(timezone.utc)
+
+        if player.active_quest_id:
+            active_quest = find_quest(player.active_quest_id)
+            remaining_active = active_quest_remaining(player, now)
+            if active_quest is None:
+                player.active_quest_id = None
+                player.active_quest_complete_at = None
+                await bot.database.update_player(player)
+            else:
+                if remaining_active is None:
+                    remaining_active = timedelta(0)
+                if remaining_active <= timedelta(0):
+                    await complete_active_quest(
+                        interaction,
+                        player,
+                        active_quest,
+                        progress_map=progress_map,
+                        now=now,
+                    )
+                    return
+                await interaction.response.send_message(
+                    embed=quest_block_embed(player, active_quest, remaining_active),
+                    ephemeral=True,
+                )
+                return
+
+        ready, remaining = can_quest(player, now)
+        if not ready:
+            await interaction.response.send_message(
+                embed=cooldown_embed("quest", remaining), ephemeral=True
+            )
+            return
+        if player.hp <= 10:
+            await interaction.response.send_message(
+                embed=error_embed("You are too wounded. Visit /heal before the next quest."),
+                ephemeral=True,
+            )
+            return
+        if not energy_ready(player, quest.energy_cost):
+            await interaction.response.send_message(
+                embed=error_embed(
+                    f"You need at least {quest.energy_cost} energy. Try /rest or /work."
+                ),
+                ephemeral=True,
+            )
+            return
+
+        if progress_map is None:
+            progress_lookup = await bot.database.fetch_player_quest_progress(
+                interaction.user.id
+            )
+        else:
+            progress_lookup = progress_map
+        progress_entry = progress_lookup.get(quest.id)
+        availability = quest.availability(progress_entry, now)
+        if availability.locked:
+            await interaction.response.send_message(
+                embed=error_embed("You have already completed this story quest."),
+                ephemeral=True,
+            )
+            return
+        if not availability.available:
+            if availability.cooldown_remaining is not None:
+                await interaction.response.send_message(
+                    embed=cooldown_embed(quest.name, availability.cooldown_remaining),
+                    ephemeral=True,
+                )
+            else:
+                await interaction.response.send_message(
+                    embed=error_embed("This quest is not available yet."),
+                    ephemeral=True,
+                )
+            return
+
+        completion_at = now + quest.duration
+        player.active_quest_id = quest.id
+        player.active_quest_complete_at = completion_at
+        await bot.database.update_player(player)
+
+        duration_text = short_timedelta(quest.duration)
+        return_text = discord.utils.format_dt(completion_at, style="R")
+        description = (
+            f"{quest.summary}\n\n"
+            f"⏳ Duration: **{duration_text}**\n"
+            f"📅 Returns {return_text}\n"
+            "Use /quest status to track your progress."
+        )
+        embed = discord.Embed(
+            title=f"{interaction.user.display_name} sets out on {quest.name}!",
+            description=description,
+            color=discord.Color.orange(),
+        )
+        embed.set_footer(text="Quests resolve automatically once the timer ends.")
+        embed.add_field(
+            name="Energy Requirement",
+            value=f"{quest.energy_cost} energy",
+            inline=True,
+        )
+        embed.add_field(
+            name="XP Multiplier",
+            value=f"×{quest.xp_multiplier:.1f}",
+            inline=True,
+        )
+        embed.add_field(
+            name="Gold Multiplier",
+            value=f"×{quest.gold_multiplier:.1f}",
+            inline=True,
+        )
+
+        await interaction.response.send_message(embed=embed)
 
     def format_achievement_lines(
         member: discord.abc.User, achievements: Sequence[Achievement]
@@ -1553,6 +1668,19 @@ def create_bot(settings: Settings) -> IdleRPGBot:
             return
 
         now = datetime.now(timezone.utc)
+        if player.active_quest_id:
+            active_quest = find_quest(player.active_quest_id)
+            remaining_active = active_quest_remaining(player, now)
+            if active_quest is None:
+                player.active_quest_id = None
+                player.active_quest_complete_at = None
+                await bot.database.update_player(player)
+            else:
+                await interaction.response.send_message(
+                    embed=quest_block_embed(player, active_quest, remaining_active),
+                    ephemeral=True,
+                )
+                return
         if membership.last_quest_at is not None:
             remaining = GUILD_QUEST_COOLDOWN - (now - membership.last_quest_at)
             if remaining > timedelta(0):
@@ -1761,6 +1889,21 @@ def create_bot(settings: Settings) -> IdleRPGBot:
             )
             return
 
+        now = datetime.now(timezone.utc)
+        if challenger.active_quest_id:
+            active_quest = find_quest(challenger.active_quest_id)
+            remaining_active = active_quest_remaining(challenger, now)
+            if active_quest is None:
+                challenger.active_quest_id = None
+                challenger.active_quest_complete_at = None
+                await bot.database.update_player(challenger)
+            else:
+                await interaction.response.send_message(
+                    embed=quest_block_embed(challenger, active_quest, remaining_active),
+                    ephemeral=True,
+                )
+                return
+
         opponent_player = await bot.database.fetch_player(interaction.guild.id, opponent.id)
         if opponent_player is None or opponent_player.class_id is None:
             await interaction.response.send_message(
@@ -1768,6 +1911,23 @@ def create_bot(settings: Settings) -> IdleRPGBot:
                 ephemeral=True,
             )
             return
+
+        opponent_subject = opponent.mention if hasattr(opponent, "mention") else opponent.display_name
+        if opponent_player.active_quest_id:
+            active_quest = find_quest(opponent_player.active_quest_id)
+            remaining_active = active_quest_remaining(opponent_player, now)
+            if active_quest is None:
+                opponent_player.active_quest_id = None
+                opponent_player.active_quest_complete_at = None
+                await bot.database.update_player(opponent_player)
+            else:
+                await interaction.response.send_message(
+                    embed=quest_block_embed(
+                        opponent_player, active_quest, remaining_active, subject=opponent_subject
+                    ),
+                    ephemeral=True,
+                )
+                return
 
         challenger_weapon = await bot.database.fetch_equipped_weapon(
             interaction.guild.id, interaction.user.id
@@ -3696,6 +3856,79 @@ def create_bot(settings: Settings) -> IdleRPGBot:
         name="quest", description="Browse and embark on quests"
     )
 
+    @quest_group.command(name="status", description="Check your current quest timer")
+    async def quest_status(interaction: discord.Interaction) -> None:
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message(
+                embed=error_embed("Quests require a guild context."), ephemeral=True
+            )
+            return
+
+        player = await bot.database.fetch_player(guild.id, interaction.user.id)
+        if player is None or player.class_id is None:
+            await interaction.response.send_message(
+                embed=error_embed(
+                    "Create your character with /create before checking quest status."
+                ),
+                ephemeral=True,
+            )
+            return
+
+        now = datetime.now(timezone.utc)
+
+        if not player.active_quest_id:
+            embed = discord.Embed(
+                title="No active quest",
+                description="You are not currently on a quest. Use /quest start to begin one.",
+                color=discord.Color.orange(),
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+
+        quest_def = find_quest(player.active_quest_id)
+        if quest_def is None:
+            player.active_quest_id = None
+            player.active_quest_complete_at = None
+            await bot.database.update_player(player)
+            await interaction.response.send_message(
+                embed=error_embed(
+                    "Your previous quest is no longer available and has been cleared."
+                ),
+                ephemeral=True,
+            )
+            return
+
+        remaining = active_quest_remaining(player, now)
+        if remaining is None:
+            remaining = timedelta(0)
+        if remaining <= timedelta(0):
+            progress_map = await bot.database.fetch_player_quest_progress(interaction.user.id)
+            await complete_active_quest(
+                interaction,
+                player,
+                quest_def,
+                progress_map=progress_map,
+                now=now,
+            )
+            return
+
+        finish_at = player.active_quest_complete_at
+        finish_text = (
+            discord.utils.format_dt(finish_at, style="R") if finish_at is not None else "Unknown"
+        )
+        embed = discord.Embed(
+            title=f"{quest_def.name} in progress",
+            description=(
+                f"Time remaining: **{short_timedelta(remaining)}**\n"
+                f"Expected completion: {finish_text}"
+            ),
+            color=discord.Color.orange(),
+        )
+        embed.add_field(name="Summary", value=quest_def.summary, inline=False)
+        embed.set_footer(text="Quests resolve automatically once the timer ends.")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
     @quest_group.command(name="list", description="View all quest options and cooldowns")
     async def quest_list(interaction: discord.Interaction) -> None:
         guild = interaction.guild
@@ -3779,6 +4012,19 @@ def create_bot(settings: Settings) -> IdleRPGBot:
             return
 
         now = datetime.now(timezone.utc)
+        if player.active_quest_id:
+            active_quest = find_quest(player.active_quest_id)
+            remaining_active = active_quest_remaining(player, now)
+            if active_quest is None:
+                player.active_quest_id = None
+                player.active_quest_complete_at = None
+                await bot.database.update_player(player)
+            else:
+                await interaction.response.send_message(
+                    embed=quest_block_embed(player, active_quest, remaining_active),
+                    ephemeral=True,
+                )
+                return
         ready, remaining = can_quest(player, now)
         if not ready:
             await interaction.response.send_message(
@@ -4020,6 +4266,19 @@ def create_bot(settings: Settings) -> IdleRPGBot:
             return
 
         now = datetime.now(timezone.utc)
+        if player.active_quest_id:
+            active_quest = find_quest(player.active_quest_id)
+            remaining_active = active_quest_remaining(player, now)
+            if active_quest is None:
+                player.active_quest_id = None
+                player.active_quest_complete_at = None
+                await bot.database.update_player(player)
+            else:
+                await interaction.response.send_message(
+                    embed=quest_block_embed(player, active_quest, remaining_active),
+                    ephemeral=True,
+                )
+                return
         ready, remaining = can_raid(player, now)
         if not ready:
             await interaction.response.send_message(
@@ -4163,6 +4422,21 @@ def create_bot(settings: Settings) -> IdleRPGBot:
             )
             return
 
+        now = datetime.now(timezone.utc)
+        if player.active_quest_id:
+            active_quest = find_quest(player.active_quest_id)
+            remaining_active = active_quest_remaining(player, now)
+            if active_quest is None:
+                player.active_quest_id = None
+                player.active_quest_complete_at = None
+                await bot.database.update_player(player)
+            else:
+                await interaction.response.send_message(
+                    embed=quest_block_embed(player, active_quest, remaining_active),
+                    ephemeral=True,
+                )
+                return
+
         active_raid = await bot.database.fetch_active_raid()
         if active_raid is not None and active_raid.is_active:
             await interaction.response.send_message(
@@ -4232,6 +4506,21 @@ def create_bot(settings: Settings) -> IdleRPGBot:
             )
             return
 
+        now = datetime.now(timezone.utc)
+        if player.active_quest_id:
+            active_quest = find_quest(player.active_quest_id)
+            remaining_active = active_quest_remaining(player, now)
+            if active_quest is None:
+                player.active_quest_id = None
+                player.active_quest_complete_at = None
+                await bot.database.update_player(player)
+            else:
+                await interaction.response.send_message(
+                    embed=quest_block_embed(player, active_quest, remaining_active),
+                    ephemeral=True,
+                )
+                return
+
         participant = await bot.database.ensure_raid_participant(
             raid_instance.id, interaction.user.id
         )
@@ -4282,6 +4571,19 @@ def create_bot(settings: Settings) -> IdleRPGBot:
             return
 
         now = datetime.now(timezone.utc)
+        if player.active_quest_id:
+            active_quest = find_quest(player.active_quest_id)
+            remaining_active = active_quest_remaining(player, now)
+            if active_quest is None:
+                player.active_quest_id = None
+                player.active_quest_complete_at = None
+                await bot.database.update_player(player)
+            else:
+                await interaction.response.send_message(
+                    embed=quest_block_embed(player, active_quest, remaining_active),
+                    ephemeral=True,
+                )
+                return
         ready, remaining = can_raid(player, now)
         if not ready:
             await interaction.response.send_message(
@@ -4461,6 +4763,21 @@ def create_bot(settings: Settings) -> IdleRPGBot:
             )
             return
 
+        now = datetime.now(timezone.utc)
+        if player.active_quest_id:
+            active_quest = find_quest(player.active_quest_id)
+            remaining_active = active_quest_remaining(player, now)
+            if active_quest is None:
+                player.active_quest_id = None
+                player.active_quest_complete_at = None
+                await bot.database.update_player(player)
+            else:
+                await interaction.response.send_message(
+                    embed=quest_block_embed(player, active_quest, remaining_active),
+                    ephemeral=True,
+                )
+                return
+
         marriage = await bot.database.fetch_marriage(guild.id, interaction.user.id)
         if marriage is None:
             await interaction.response.send_message(
@@ -4493,6 +4810,25 @@ def create_bot(settings: Settings) -> IdleRPGBot:
             )
             return
 
+        spouse_subject = (
+            spouse_member.mention if hasattr(spouse_member, "mention") else spouse_member.display_name
+        )
+        if spouse_player.active_quest_id:
+            active_quest = find_quest(spouse_player.active_quest_id)
+            remaining_active = active_quest_remaining(spouse_player, now)
+            if active_quest is None:
+                spouse_player.active_quest_id = None
+                spouse_player.active_quest_complete_at = None
+                await bot.database.update_player(spouse_player)
+            else:
+                await interaction.response.send_message(
+                    embed=quest_block_embed(
+                        spouse_player, active_quest, remaining_active, subject=spouse_subject
+                    ),
+                    ephemeral=True,
+                )
+                return
+
         proposer_before = {
             record.achievement.code
             for record in await bot.database.list_player_achievements(proposal.proposer_id)
@@ -4502,7 +4838,6 @@ def create_bot(settings: Settings) -> IdleRPGBot:
             for record in await bot.database.list_player_achievements(proposal.proposee_id)
         }
 
-        now = datetime.now(timezone.utc)
         ready_self, remaining_self = can_quest(player, now)
         if not ready_self:
             await interaction.response.send_message(

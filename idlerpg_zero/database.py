@@ -97,6 +97,8 @@ class Player:
     last_work_at: Optional[datetime] = None
     last_rest_at: Optional[datetime] = None
     last_proposal_at: Optional[datetime] = None
+    active_quest_id: Optional[str] = None
+    active_quest_complete_at: Optional[datetime] = None
 
     @classmethod
     def from_row(cls, row: aiosqlite.Row) -> "Player":
@@ -130,6 +132,8 @@ class Player:
             last_work_at=_parse_time(row["last_work_at"]),
             last_rest_at=_parse_time(row["last_rest_at"]),
             last_proposal_at=_parse_time(row["last_proposal_at"]) if "last_proposal_at" in keys else None,
+            active_quest_id=row["active_quest_id"] if "active_quest_id" in keys else None,
+            active_quest_complete_at=_parse_time(row["active_quest_complete_at"]) if "active_quest_complete_at" in keys else None,
         )
 
     def as_db_tuple(self) -> Sequence[object]:
@@ -157,6 +161,8 @@ class Player:
             _format_time(self.last_work_at),
             _format_time(self.last_rest_at),
             _format_time(self.last_proposal_at),
+            self.active_quest_id,
+            _format_time(self.active_quest_complete_at),
             self.user_id,
         )
 
@@ -725,6 +731,8 @@ class Database:
                 last_work_at TEXT,
                 last_rest_at TEXT,
                 last_proposal_at TEXT,
+                active_quest_id TEXT,
+                active_quest_complete_at TEXT,
                 created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
                 updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
             );
@@ -983,6 +991,8 @@ class Database:
             "pvp_season_wins": "ALTER TABLE players ADD COLUMN pvp_season_wins INTEGER NOT NULL DEFAULT 0",
             "pvp_season_losses": "ALTER TABLE players ADD COLUMN pvp_season_losses INTEGER NOT NULL DEFAULT 0",
             "equipped_title_id": "ALTER TABLE players ADD COLUMN equipped_title_id INTEGER REFERENCES achievements(id)",
+            "active_quest_id": "ALTER TABLE players ADD COLUMN active_quest_id TEXT",
+            "active_quest_complete_at": "ALTER TABLE players ADD COLUMN active_quest_complete_at TEXT",
         }
 
         for column, statement in column_statements.items():
@@ -1556,8 +1566,9 @@ class Database:
                 pvp_wins, pvp_losses, pvp_season_wins, pvp_season_losses,
                 equipped_title_id,
                 last_quest_at, last_raid_at, last_work_at, last_rest_at,
-                last_proposal_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                last_proposal_at,
+                active_quest_id, active_quest_complete_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 player.user_id,
@@ -1582,6 +1593,8 @@ class Database:
                 _format_time(player.last_work_at),
                 _format_time(player.last_rest_at),
                 _format_time(player.last_proposal_at),
+                player.active_quest_id,
+                _format_time(player.active_quest_complete_at),
             ),
         )
 
@@ -1857,6 +1870,7 @@ class Database:
                 quests_completed = ?, raids_completed = ?, equipped_title_id = ?,
                 last_quest_at = ?, last_raid_at = ?, last_work_at = ?, last_rest_at = ?,
                 last_proposal_at = ?,
+                active_quest_id = ?, active_quest_complete_at = ?,
                 updated_at = (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
             WHERE user_id = ?
             """,
