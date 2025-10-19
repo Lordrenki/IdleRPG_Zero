@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Iterable, Mapping, Optional, Sequence, Tuple
 
 import discord
@@ -31,6 +31,7 @@ from .quests import (
     QuestDefinition,
     QuestProgress,
     category_display_name,
+    find_quest,
     summarize_rewards,
 )
 
@@ -59,6 +60,7 @@ def profile_embed(
         title=f"{member.display_name}'s Adventure",
         color=PRIMARY_COLOR,
     )
+    now = datetime.now(timezone.utc)
     avatar_url: Optional[str] = None
     if profile and profile.avatar_url:
         avatar_url = profile.avatar_url
@@ -143,6 +145,27 @@ def profile_embed(
             value=f"{armor_info.name} • DEF +{armor_info.defense_boost}",
             inline=False,
         )
+    if player.active_quest_id:
+        quest = find_quest(player.active_quest_id)
+        finish_at = player.active_quest_complete_at
+        if quest is not None and finish_at is not None:
+            remaining = finish_at - now
+            if remaining > timedelta(0):
+                remaining_text = _format_timedelta(remaining)
+                finish_text = discord.utils.format_dt(finish_at, style="R")
+                quest_value = (
+                    f"On **{quest.name}**\n"
+                    f"Time remaining: {remaining_text}\n"
+                    f"Returns {finish_text}"
+                )
+            else:
+                quest_value = (
+                    f"Quest complete!\n"
+                    f"Ready to finish **{quest.name}**."
+                )
+        else:
+            quest_value = "Quest in progress"
+        embed.add_field(name="Current Quest", value=quest_value, inline=False)
     if player.attack_buff_battles > 0 and player.attack_buff_percent > 0:
         embed.add_field(
             name="Attack Buff",
@@ -269,7 +292,7 @@ def quest_list_embed(
         reward_summary = summarize_rewards(quest)
         detail = (
             f"{quest.summary}\n"
-            f"Energy {quest.energy_cost} • XP×{quest.xp_multiplier:.1f} • "
+            f"Duration {_format_timedelta(quest.duration)} • Energy {quest.energy_cost} • "
             f"Gold×{quest.gold_multiplier:.1f}\n"
             f"{reward_summary}\n{status}"
         )

@@ -40,6 +40,7 @@ class QuestDefinition:
     success_text: str
     category: QuestCategory
     cooldown: Optional[timedelta]
+    duration: timedelta
     xp_multiplier: float = 1.0
     gold_multiplier: float = 1.0
     energy_cost: int = 20
@@ -123,12 +124,22 @@ def _quest(
     success_text: str,
     category: QuestCategory,
     cooldown: Optional[timedelta],
+    duration: Optional[timedelta] = None,
     xp_multiplier: float = 1.0,
     gold_multiplier: float = 1.0,
     energy_cost: int = 20,
     rewards: Optional[QuestReward] = None,
     repeatable: bool = True,
 ) -> QuestDefinition:
+    if duration is None:
+        if category == "daily":
+            duration = timedelta(minutes=10)
+        elif category == "weekly":
+            duration = timedelta(minutes=30)
+        elif category == "story":
+            duration = timedelta(hours=1)
+        else:
+            duration = timedelta(minutes=30)
     return QuestDefinition(
         id=id,
         name=name,
@@ -137,6 +148,7 @@ def _quest(
         success_text=success_text,
         category=category,
         cooldown=cooldown,
+        duration=duration,
         xp_multiplier=xp_multiplier,
         gold_multiplier=gold_multiplier,
         energy_cost=energy_cost,
