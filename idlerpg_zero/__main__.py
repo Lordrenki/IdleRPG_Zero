@@ -3,9 +3,31 @@
 from __future__ import annotations
 
 import logging
+import sys
 from importlib import import_module
+from pathlib import Path
 
-from .config import load_settings
+try:
+    from .config import load_settings
+except ImportError as exc:  # pragma: no cover - script execution fallback
+    # When executed as ``python path/to/__main__.py`` the package context is
+    # missing, so retry the import with an absolute module path.
+    module_name = getattr(exc, "name", None)
+    should_retry = module_name in {
+        f"{__package__}.config" if __package__ else "idlerpg_zero.config",
+        "config",
+    } or "attempted relative import" in str(exc).lower()
+    if not should_retry:
+        raise
+
+    package_root = Path(__file__).resolve().parent
+    parent = package_root.parent
+    if str(parent) not in sys.path:
+        sys.path.insert(0, str(parent))
+
+    globals()["__package__"] = "idlerpg_zero"
+
+    from idlerpg_zero.config import load_settings  # type: ignore
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)

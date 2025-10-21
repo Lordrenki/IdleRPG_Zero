@@ -1,7 +1,11 @@
 __pycache__/
-*.pyc
-.env
-*.sqlite3
-.venv/
+*.py[cod]
+*.egg-info/
 .idea/
 .DS_Store
+.env
+.venv/
+.env.local
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
