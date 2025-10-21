@@ -88,6 +88,7 @@ from .quests import (
     QuestProgress,
     all_quests,
     find_quest,
+    random_adventure_quest,
     roll_random_encounter,
     search_quests,
 )
@@ -4039,35 +4040,8 @@ def create_bot(settings: Settings) -> IdleRPGBot:
             return
 
         progress_map = await bot.database.fetch_player_quest_progress(interaction.user.id)
-        available: List[QuestDefinition] = []
-        energy_blocked: List[QuestDefinition] = []
-        for quest_def in all_quests():
-            availability = quest_def.availability(progress_map.get(quest_def.id), now)
-            if not availability.available:
-                continue
-            if energy_ready(player, quest_def.energy_cost):
-                available.append(quest_def)
-            else:
-                energy_blocked.append(quest_def)
-
-        if not available:
-            if energy_blocked:
-                await interaction.response.send_message(
-                    embed=error_embed(
-                        "You need more energy before heading out. Try /rest or /work."
-                    ),
-                    ephemeral=True,
-                )
-            else:
-                await interaction.response.send_message(
-                    embed=error_embed(
-                        "No quests are currently ready. Check /quest list for cooldown timers."
-                    ),
-                    ephemeral=True,
-                )
-            return
-
-        quest_choice = random.choice(available)
+        duration_minutes = random.randint(5, 30)
+        quest_choice = random_adventure_quest(timedelta(minutes=duration_minutes))
         await execute_quest(interaction, quest_choice, progress_map=progress_map)
 
     async def autocomplete_raid_boss(

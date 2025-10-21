@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 import random
 from typing import Iterable, Mapping, Optional, Sequence, Tuple
@@ -155,6 +155,81 @@ def _quest(
         rewards=rewards or QuestReward(),
         repeatable=repeatable,
     )
+
+
+@dataclass(slots=True, frozen=True)
+class AdventureFlavor:
+    """Lightweight flavour text for generic adventure quests."""
+
+    id: str
+    summary: str
+    narrative: str
+    success_text: str
+
+
+_ADVENTURE_FLAVORS: Sequence[AdventureFlavor] = (
+    AdventureFlavor(
+        id="wander",
+        summary="Out on an adventure.",
+        narrative="You wander the nearby paths, trading waves with fellow travellers.",
+        success_text="You return with a few stories and some extra loot.",
+    ),
+    AdventureFlavor(
+        id="errands",
+        summary="Helping with small errands around town.",
+        narrative="You lend a hand where it's needed, carrying parcels and sharing smiles.",
+        success_text="The grateful townsfolk tip you for the help and wish you well.",
+    ),
+    AdventureFlavor(
+        id="scout",
+        summary="A short scouting trip beyond the gates.",
+        narrative="You scout the outskirts, checking on trails and tidying waymarkers.",
+        success_text="You make it back with a clearer map and a few useful finds.",
+    ),
+    AdventureFlavor(
+        id="patrol",
+        summary="Keeping watch over the crossroads.",
+        narrative="You keep a relaxed patrol, greeting caravans and sharing travel tips.",
+        success_text="You finish your watch with new contacts and a modest reward.",
+    ),
+)
+
+_ADVENTURE_FLAVOR_LOOKUP = {flavor.id: flavor for flavor in _ADVENTURE_FLAVORS}
+
+
+def _adventure_identifier(flavor_id: str) -> str:
+    return f"adventure:{flavor_id}"
+
+
+def _get_adventure_flavor(identifier: Optional[str]) -> AdventureFlavor:
+    if identifier:
+        return _ADVENTURE_FLAVOR_LOOKUP.get(identifier, _ADVENTURE_FLAVORS[0])
+    return _ADVENTURE_FLAVORS[0]
+
+
+def _adventure_template(flavor_id: Optional[str] = None) -> QuestDefinition:
+    flavor = _get_adventure_flavor(flavor_id)
+    return QuestDefinition(
+        id=_adventure_identifier(flavor.id),
+        name="an adventure",
+        summary=flavor.summary,
+        narrative=flavor.narrative,
+        success_text=flavor.success_text,
+        category="adventure",
+        cooldown=None,
+        duration=timedelta(minutes=10),
+        xp_multiplier=1.0,
+        gold_multiplier=1.0,
+        energy_cost=20,
+    )
+
+
+def random_adventure_quest(duration: timedelta) -> QuestDefinition:
+    """Create a lightweight quest definition for the adventure command."""
+
+    flavor = random.choice(_ADVENTURE_FLAVORS)
+    template = _adventure_template(flavor.id)
+    return replace(template, duration=duration)
 
 
 QUESTS: Sequence[QuestDefinition] = (
@@ -380,6 +455,9 @@ def quests_by_category() -> Mapping[QuestCategory, Sequence[QuestDefinition]]:
 
 def find_quest(identifier: str) -> Optional[QuestDefinition]:
     lowered = identifier.lower()
+    if lowered.startswith("adventure"):
+        _, _, flavor_id = lowered.partition(":")
+        return _adventure_template(flavor_id or None)
     for quest in QUESTS:
         if quest.id == lowered or quest.name.lower() == lowered:
             return quest
