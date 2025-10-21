@@ -19,5 +19,5 @@ requires-python = ">=3.10"
 [project.scripts]
 idlerpg-zero = "idlerpg_zero.__main__:main"
 
-[tool.setuptools]
-packages = ["idlerpg_zero"]
+[tool.setuptools.packages.find]
+include = ["idlerpg_zero*"]
